@@ -1,0 +1,28 @@
+@startuml
+actor YOLOTeam #red
+entity ethereumIssuance #orange
+entity polygonIssuance #blue
+participant Contributors  #green
+control FxBaseRootTunnel #brown
+control FxBaseChildTunnel #yellow
+YOLOTeam -> ethereumIssuance: Contract Creation
+YOLOTeam -> ethereumIssuance: setChildIssuanceContractAddress(address contractAddress)
+YOLOTeam -> ethereumIssuance: setRootManagerContract(address contractAddress)
+YOLOTeam -> polygonIssuance: Contract Creation
+YOLOTeam -> ethereumIssuance: openContributionWindow() 1
+YOLOTeam -> polygonIssuance:  openContributionWindow() 2
+Contributors -> ethereumIssuance:  contribute(ETH)
+Contributors -> polygonIssuance:   contribute(mETH)
+YOLOTeam -> ethereumIssuance: closeContributionWindow()
+YOLOTeam -> polygonIssuance:  closeContributionWindow()
+polygonIssuance -> FxBaseChildTunnel:  sendMessageToRoot()
+FxBaseRootTunnel -> ethereumIssuance:  _processMessageFromChild()
+YOLOTeam -> ethereumIssuance: depositOnChildIssuanceContract()
+ethereumIssuance -> FxBaseRootTunnel: rootChainManagerContract.depositFor()- mint YOLO tokens to polygonIssuance
+YOLOTeam -> ethereumIssuance: openRedemptionRegime()
+YOLOTeam -> polygonIssuance:  openRedemptionRegime()
+Contributors -> ethereumIssuance: redeemTokens() 
+Contributors -> polygonIssuance: redeemTokens()
+YOLOTeam -> ethereumIssuance: migrateInvestmentFund()
+YOLOTeam -> polygonIssuance:  migrateInvestmentFund()
+@enduml

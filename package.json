@@ -1,0 +1,33 @@
+{
+  "name": "yolo-dual-issuance",
+  "version": "1.0.0",
+  "description": "ethereum and polygon synced dual token issuance",
+  "main": "index.js",
+  "scripts": {
+    "test": "test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YOLOrekt/yolo-lp-pools.git"
+  },
+  "keywords": [
+    "smart",
+    "contracts,",
+    "token",
+    "issuance,"
+  ],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/YOLOrekt/yolo-lp-pools/issues"
+  },
+  "homepage": "https://github.com/YOLOrekt/yolo-lp-pools#readme",
+  "dependencies": {
+    "bignumber.js": "^9.0.1",
+    "truffle": "^5.3.9"
+  },
+  "devDependencies": {
+    "@openzeppelin/test-helpers": "^0.5.11",
+    "solidity-coverage": "^0.7.16"
+  }
+}
