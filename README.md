@@ -1,6 +1,6 @@
 # dual-issuance-bug-bounty
 
-Find a bug, get some crypto!!
+Find a bug, get some crypto!! Check our twitter @playyolorekt and medium https://medium.com/yolorekt/ for more details on bounties.
 
 # YOLO token dual-issuance on Ethereum and Polygon
 

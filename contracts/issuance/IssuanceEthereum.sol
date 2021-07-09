@@ -85,9 +85,7 @@ contract IssuanceEthereum is IssuanceCommon, FxBaseRootTunnel {
             "erc20 predicate contract address must be specified"
         );
 
-        // TODO: Add checkpointManager_ and fxRoot_ hardcoded? Use constant to save them
-        // Find mainnet and goerli address
-        // Use ChainId to compare and stop contract instantiaion if its the wrong address
+        // TODO: Use ChainId to compare and stop contract instantiaion if its the wrong address?
 
         yoloEthereumTokenContract = YoloEthereumUtilityTokens(
             yoloEthereumTokenAddress_
@@ -170,7 +168,6 @@ contract IssuanceEthereum is IssuanceCommon, FxBaseRootTunnel {
         );
         require(msg.value > 0, "zero amount invalid");
 
-        // TODO: check to see if reference var is cheaper
         uint256 contributorTotal = contributorAmounts[msg.sender] + msg.value;
 
         contributorAmounts[msg.sender] = contributorTotal;
@@ -186,14 +183,6 @@ contract IssuanceEthereum is IssuanceCommon, FxBaseRootTunnel {
         restricted
         returns (bool)
     {
-        // TODO: More thought on when/who can end the token issuance
-
-        // require(
-        //     msg.sender == owner ||
-        //         block.timestamp > contributionStartTimestamp + 5 days,
-        //     "Issuance is not eligible to end yet until 6 days after contribution window."
-        // );
-
         require(
             isContributionWindowOpen == true,
             "contribution window must be open before closing"
@@ -260,8 +249,6 @@ contract IssuanceEthereum is IssuanceCommon, FxBaseRootTunnel {
     }
 
     function openRedemptionRegime() external override returns (bool) {
-        // TODO: Zero Contribution case
-        // check repeateadly - this means isContributionWindowClosed is also true
         require(
             hasRootToChildTransferRequest == true,
             "requires token transfer request to child and updated root token pool amount"
