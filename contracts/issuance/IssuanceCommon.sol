@@ -11,7 +11,7 @@ abstract contract IssuanceCommon is Ownable {
     bool public isRedemptionRegimeOpen;
     uint256 public contributionStartTimestamp;
 
-    // !!! mark internal for unit testing - change to public permanently?
+    // !!! mark internal for unit testing
     // Mapping contributors address to amount
     mapping(address => uint256) public contributorAmounts;
 
@@ -27,9 +27,7 @@ abstract contract IssuanceCommon is Ownable {
         uint256 allocatedTokens
     );
     event TokensRedeemed(address indexed redeemer, uint256 value);
-    // event ClaimRevoked(address indexed revoker, uint256 value);
     event InvestmentFundTransferred(address indexed recipient, uint256 value);
-    // event StagnantTokensReturned(address indexed recipient, uint256 value);
 
     modifier validateRecipient(address _recipient) {
         require(_recipient != address(0), "recipient cannot be zero address");

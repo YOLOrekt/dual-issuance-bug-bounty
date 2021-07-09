@@ -129,7 +129,6 @@ contract IssuancePolygon is IssuanceCommon, FxBaseChildTunnel {
         mEthTokenContract.transferFrom(msg.sender, address(this), mEthAmount);
         contributorAmounts[msg.sender] = contributorTotal;
 
-        // Fixed Here - Check again
         childSum += mEthAmount;
 
         emit ContributionMade(msg.sender, mEthAmount);
@@ -145,14 +144,6 @@ contract IssuancePolygon is IssuanceCommon, FxBaseChildTunnel {
         restricted
         returns (bool)
     {
-        // TODO: More thought on when/who can end the token issuance
-
-        // require(
-        //     msg.sender == owner ||
-        //         block.timestamp > contributionStartTimestamp + 5 days,
-        //     "Issuance is not eligible to end yet until 6 days after contribution window."
-        // );
-
         require(
             isContributionWindowOpen == true,
             "contribution window must be open before closing"
