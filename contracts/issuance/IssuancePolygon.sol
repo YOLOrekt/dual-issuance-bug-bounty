@@ -172,7 +172,6 @@ contract IssuancePolygon is IssuanceCommon, FxBaseChildTunnel {
 
     // !!! Add virtual for unit testing !!!
     function openRedemptionRegime() external virtual override returns (bool) {
-        // Which will unlock once the product goes live.
         require(
             isContributionWindowClosed == true,
             "contribution window must be closed"

@@ -249,8 +249,6 @@ contract IssuanceEthereum is IssuanceCommon, FxBaseRootTunnel {
     }
 
     function openRedemptionRegime() external override returns (bool) {
-        // TODO: Zero Contribution case
-        // check repeateadly - this means isContributionWindowClosed is also true
         require(
             hasRootToChildTransferRequest == true,
             "requires token transfer request to child and updated root token pool amount"
