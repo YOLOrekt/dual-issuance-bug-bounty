@@ -8,6 +8,8 @@ const {
   expectEvent, // Assertions for emitted events
   expectRevert, // Assertions for transactions that should fail
 } = require("@openzeppelin/test-helpers");
+const { assertion } = require("@openzeppelin/test-helpers/src/expectRevert");
+const { web3 } = require("@openzeppelin/test-helpers/src/setup");
 
 const YoloEthereumUtilityTokens = artifacts.require(
   "YoloEthereumUtilityTokens"
@@ -30,9 +32,11 @@ const { ZERO_ADDRESS, ZERO_BYTES32, MAX_UINT256, MAX_INT256, MIN_INT256 } =
 
 const MINTER_ROLE = web3.utils.soliditySha3("MINTER_ROLE");
 
+const bnOne = new BN("1", 10);
 const bnTen = new BN("10", 10);
 const bnNine = new BN("9", 10);
 const bnFifty = new BN("50", 10);
+const bnHundred = new BN("100", 10);
 const bnMillion = new BN("1000000", 10);
 const bnDecimalPlaces = new BN("18", 10);
 const tokenDecimals = bnTen.pow(bnDecimalPlaces);
@@ -40,6 +44,7 @@ const supplyInteger = bnTen.pow(bnNine);
 const issuanceInteger = bnFifty.mul(bnMillion);
 const totalIssuedToken = issuanceInteger.mul(tokenDecimals);
 const totalTokenSupply = supplyInteger.mul(tokenDecimals);
+const minimumContributionAmount = tokenDecimals.div(bnHundred);
 console.log("total issued tokens:: ", totalIssuedToken.toString());
 console.log(
   "total issued tokens (E18 + E7):: ",
@@ -48,6 +53,7 @@ console.log(
 
 const gasMax = "8000000";
 const zeroNumberString = "0";
+const oneWei = "1";
 
 const createRandomAddress = () => web3.eth.accounts.create().address;
 
@@ -564,6 +570,28 @@ describe("Issuance Contract Test", () => {
         });
       });
 
+      it("Migrates investment fund", async () => {
+        await issuanceEthereum.registerFundRecipient(unassociatedAccount);
+        await issuancePolygon.registerFundRecipient(unassociatedAccount);
+
+        const receiptEthereum = await issuanceEthereum.migrateInvestmentFund(
+          unassociatedAccount
+        );
+        const receiptPolygon = await issuancePolygon.migrateInvestmentFund(
+          unassociatedAccount
+        );
+
+        expectEvent(receiptEthereum, "InvestmentFundTransferred", {
+          recipient: unassociatedAccount,
+          value: zeroNumberString,
+        });
+
+        expectEvent(receiptPolygon, "InvestmentFundTransferred", {
+          recipient: unassociatedAccount,
+          value: zeroNumberString,
+        });
+      });
+
       it("Emits expected event after opening redemption window, following closing of issuance window", async () => {
         await rootChainManagerProxy.setRootIssuanceAddress(
           issuanceEthereum.address
@@ -727,6 +755,18 @@ describe("Issuance Contract Test", () => {
       );
     });
 
+    it("Cannot contribute before window opened", async () => {
+      await expectRevert(
+        issuanceEthereum.contribute({ from: investorOne, value: oneWei }),
+        "contribution window has not opened"
+      );
+
+      await expectRevert(
+        issuancePolygon.contribute(oneWei, { from: investorOne }),
+        "contribution window has not opened"
+      );
+    });
+
     it("Cannot open contribution window without tokens in IssuanceEthereum", async () => {
       await expectRevert(
         issuanceEthereum.openContributionWindow(),
@@ -817,6 +857,50 @@ describe("Issuance Contract Test", () => {
       await issuanceEthereum.openContributionWindow();
     });
 
+    it("Cannot return YOLO tokens from issuanceEthereum once window open", async () => {
+      await expectRevert(
+        issuanceEthereum.returnYoloTokens(unassociatedAccount, oneWei),
+        "contribution window already opened"
+      );
+    });
+
+    it("Cannot contribute less than 0.01 ether", async () => {
+      const value = minimumContributionAmount.sub(bnOne);
+
+      await expectRevert(
+        issuanceEthereum.contribute({ from: investorOne, value }),
+        "minimum contribution is 0.01 ether"
+      );
+
+      await expectRevert(
+        issuancePolygon.contribute(value, {
+          from: investorOne,
+        }),
+        "minimum contribution is 0.01 ether"
+      );
+    });
+
+    it("Cannot contribute wrapped eth without approval", async () => {
+      await expectRevert(
+        issuancePolygon.contribute(minimumContributionAmount, {
+          from: investorOne,
+        }),
+        "contributor must approve issuance contract via mEth token contract in order to contribute tokens"
+      );
+    });
+
+    it("Cannot open contribution window again", async () => {
+      await expectRevert(
+        issuanceEthereum.openContributionWindow(),
+        "contribution window already opened"
+      );
+
+      await expectRevert(
+        issuancePolygon.openContributionWindow(),
+        "contribution window already opened"
+      );
+    });
+
     it("Cannot close contribution window without admin privelages", async () => {
       await expectRevert(
         issuanceEthereum.closeContributionWindow({ from: unassociatedAccount }),
@@ -826,6 +910,13 @@ describe("Issuance Contract Test", () => {
       await expectRevert(
         issuancePolygon.closeContributionWindow({ from: unassociatedAccount }),
         "Must have admin role to invoke"
+      );
+    });
+
+    it("Contribution window must be provessed before depositOnChildIssuanceContract", async () => {
+      await expectRevert(
+        issuanceEthereum.depositOnChildIssuanceContract(),
+        "contribution window must be closed"
       );
     });
 
@@ -844,6 +935,18 @@ describe("Issuance Contract Test", () => {
       );
     });
 
+    it("Cannot contribute after window closed", async () => {
+      await expectRevert(
+        issuanceEthereum.contribute({ from: investorOne, value: oneWei }),
+        "contribution window has closed"
+      );
+
+      await expectRevert(
+        issuancePolygon.contribute(oneWei, { from: investorOne }),
+        "contribution window has closed"
+      );
+    });
+
     it("Cannot migrate investment fund without registered fund recipient", async () => {
       await expectRevert(
         issuanceEthereum.migrateInvestmentFund(unassociatedAccount),
@@ -859,6 +962,22 @@ describe("Issuance Contract Test", () => {
     it("Only admin can register fund recipient", async () => {
       await expectRevert(
         issuanceEthereum.registerFundRecipient(admin, {
+          from: unassociatedAccount,
+        }),
+        "Must have admin role to invoke"
+      );
+
+      await expectRevert(
+        issuancePolygon.migrateInvestmentFund(admin, {
+          from: unassociatedAccount,
+        }),
+        "Must have admin role to invoke"
+      );
+    });
+
+    it("Only admin can migrate contributions", async () => {
+      await expectRevert(
+        issuanceEthereum.migrateInvestmentFund(admin, {
           from: unassociatedAccount,
         }),
         "Must have admin role to invoke"
@@ -899,7 +1018,7 @@ describe("Issuance Contract Test", () => {
       );
     });
 
-    it("Public cannot open redemption window within 60 days of closing issuance window", async () => {
+    it("Child sum must be provessed before depositOnChildIssuanceContract", async () => {
       await rootChainManagerProxy.setRootIssuanceAddress(
         issuanceEthereum.address
       );
@@ -907,6 +1026,13 @@ describe("Issuance Contract Test", () => {
         yoloPolygonTokens.address
       );
 
+      await expectRevert(
+        issuanceEthereum.depositOnChildIssuanceContract(),
+        "childSum must be processed from child first"
+      );
+    });
+
+    it("Cannot call depositOnChildIssuanceContract more than once", async () => {
       // !!! calling mock override
       // must be greated than 0 transfer according to ERC20
       // will move all tokens over in this test
@@ -915,6 +1041,13 @@ describe("Issuance Contract Test", () => {
       );
       await issuanceEthereum.depositOnChildIssuanceContract();
 
+      await expectRevert(
+        issuanceEthereum.depositOnChildIssuanceContract(),
+        "root to child transfer already requested"
+      );
+    });
+
+    it("Public cannot open redemption window within 60 days of closing issuance window", async () => {
       await expectRevert(
         issuanceEthereum.openRedemptionRegime({ from: unassociatedAccount }),
         "cannot open redemption window unless owner or 60 days since deployment"
@@ -926,479 +1059,613 @@ describe("Issuance Contract Test", () => {
     });
   });
 
-  // contract("One investor", async () => {
-  //   it("Move Yolo tokens to contract", async () => {
-  //     const UTInstance = await YoloEthereumUtilityTokens.deployed();
-  //     const IssuanceInstance = await Issuance.deployed();
-  //     await UTInstance.transfer(
-  //       IssuanceInstance.address,
-  //       totalIssuedToken.toString()
-  //     );
-  //   });
-
-  //   it("Contribution emits event", async () => {
-  //     const IssuanceInstance = await Issuance.deployed();
-
-  //     const receipt = await IssuanceInstance.contribute({
-  //       from: investorOne,
-  //       value: contributionOne,
-  //     });
-
-  //     expectEvent(receipt, "ContributionMade", {
-  //       contributor: investorOne,
-  //       value: contributionOne,
-  //     });
-  //   });
-
-  //   it("Sum variable is equivalent to first contribution", async () => {
-  //     const IssuanceInstance = await Issuance.deployed();
-
-  //     const sum = await IssuanceInstance.sum();
-  //     console.log("sum is:: ", sum.toString());
-
-  //     assert.equal(
-  //       sum.toString(),
-  //       contributionOne.toString(),
-  //       "first contribution should be equivalent to sum"
-  //     );
-  //   });
-
-  //   it("Cannot claim after issuance window closed", async () => {
-  //     const IssuanceInstance = await Issuance.deployed();
-  //     await IssuanceInstance.endTokenIssuance();
-
-  //     await expectRevert(
-  //       IssuanceInstance.redeemTokens({ from: investorOne }),
-  //       "redemption window is not open yet"
-  //     );
-  //   });
-
-  //   it("Claim check false before redemption", async () => {
-  //     const IssuanceInstance = await Issuance.deployed();
-  //     const hasClaimed = await IssuanceInstance.claimsCheck(investorOne);
-
-  //     assert.equal(
-  //       hasClaimed,
-  //       false,
-  //       "claim should be false prior to redemption"
-  //     );
-  //   });
-
-  //   it("Redeem tokens", async () => {
-  //     const IssuanceInstance = await Issuance.deployed();
-  //     await IssuanceInstance.openRedemptionRegime();
-
-  //     // only one investorOne, so should receive all tokens
-  //     const calculatedTokenAmountBN = mulDivBN(
-  //       contributionOne,
-  //       totalIssuedToken,
-  //       contributionOne
-  //     );
-
-  //     const calculatedTokenAmount = calculatedTokenAmountBN.toString();
-
-  //     const receipt = await IssuanceInstance.redeemTokens({
-  //       from: investorOne,
-  //     });
-
-  //     expectEvent(receipt, "TokensRedeemed", {
-  //       redeemer: investorOne,
-  //       value: calculatedTokenAmount,
-  //     });
-  //   });
-
-  //   it("Claim already executed", async () => {
-  //     const IssuanceInstance = await Issuance.deployed();
-
-  //     await expectRevert(
-  //       IssuanceInstance.redeemTokens({ from: investorOne }),
-  //       "prior claim executed"
-  //     );
-  //   });
-  // });
-
-  // contract("Two contributors", async () => {
-  //   it("Move Yolo tokens to contract", async () => {
-  //     const UTInstance = await YoloEthereumUtilityTokens.deployed();
-  //     const IssuanceInstance = await Issuance.deployed();
-  //     const issuanceAddress = IssuanceInstance.address;
-  //     await UTInstance.transfer(issuanceAddress, totalIssuedToken.toString());
-
-  //     await IssuanceInstance.contribute({
-  //       from: investorOne,
-  //       value: contributionOne,
-  //     });
-
-  //     await IssuanceInstance.contribute({
-  //       from: investorTwo,
-  //       value: contributionTwo,
-  //     });
-  //   });
-
-  //   it("Sum variable is equivalent to total contributions", async () => {
-  //     const IssuanceInstance = await Issuance.deployed();
-  //     const sum = (await IssuanceInstance.sum()).toString();
-  //     const contributedSum = contributionOne.add(contributionTwo).toString();
-
-  //     assert.equal(
-  //       sum,
-  //       contributedSum,
-  //       "first contribution should be equivalent to sum"
-  //     );
-  //   });
-
-  //   it("Cannot claim right after issuance window closed", async () => {
-  //     const IssuanceInstance = await Issuance.deployed();
-  //     await IssuanceInstance.endTokenIssuance();
-
-  //     await expectRevert(
-  //       IssuanceInstance.redeemTokens({ from: investorTwo }),
-  //       "redemption window is not open yet"
-  //     );
-  //   });
-
-  //   it("Investor claim check is false before token redemption", async () => {
-  //     const IssuanceInstance = await Issuance.deployed();
-  //     const hasClaimed = await IssuanceInstance.claimsCheck(investorTwo);
-
-  //     assert.equal(
-  //       hasClaimed,
-  //       false,
-  //       "claim should be false prior to redemption"
-  //     );
-  //   });
-
-  //   it("Redeem tokens", async () => {
-  //     const IssuanceInstance = await Issuance.deployed();
-  //     await IssuanceInstance.openRedemptionRegime();
-  //     const sum = await IssuanceInstance.sum();
-
-  //     console.log("cantributionOne toNumber:: ", contributionOne.toNumber());
-  //     console.log(
-  //       "totalIssued string to number:: ",
-  //       Number(totalIssuedToken.toString())
-  //     );
-
-  //     console.log("two contrib sum:: ", sum.toString());
-  //     console.log("contributionTwo:: ", contributionTwo.toNumber());
-  //     console.log("number sum:: ", sum.toString());
-
-  //     // only one investorOne, so should receive all tokens
-  //     const calculatedTokenAmount = mulDivBN(
-  //       totalIssuedToken,
-  //       contributionTwo,
-  //       sum
-  //     );
-
-  //     const receipt = await IssuanceInstance.redeemTokens({
-  //       from: investorTwo,
-  //     });
-
-  //     expectEvent(receipt, "TokensRedeemed", {
-  //       redeemer: investorTwo,
-  //       value: calculatedTokenAmount,
-  //     });
-  //   });
-
-  //   it("Investor claim check following his redemption should be true", async () => {
-  //     const IssuanceInstance = await Issuance.deployed();
-  //     const hasClaimed = await IssuanceInstance.claimsCheck(investorTwo);
-
-  //     assert.equal(
-  //       hasClaimed,
-  //       true,
-  //       "claim should be false prior to redemption"
-  //     );
-  //   });
-
-  //   it("A second investor's claim check should be false before redemption", async () => {
-  //     const IssuanceInstance = await Issuance.deployed();
-  //     const hasClaimed = await IssuanceInstance.claimsCheck(investorOne);
-
-  //     assert.equal(
-  //       hasClaimed,
-  //       false,
-  //       "claim should be false prior to redemption"
-  //     );
-  //   });
-
-  //   it("Claim already executed", async () => {
-  //     const IssuanceInstance = await Issuance.deployed();
-
-  //     await expectRevert(
-  //       IssuanceInstance.redeemTokens({ from: investorTwo }),
-  //       "prior claim executed"
-  //     );
-  //   });
-
-  //   it("Last contributor redeems tokens", async () => {
-  //     const IssuanceInstance = await Issuance.deployed();
-  //     await IssuanceInstance.openRedemptionRegime();
-  //     const sum = await IssuanceInstance.sum();
-
-  //     console.log("two contrib sum:: ", sum.toString());
-  //     console.log("contributionTwo:: ", contributionOne.toNumber());
-  //     console.log("number sum:: ", Number(sum));
-
-  //     // only one investorOne, so should receive all tokens
-  //     const calculatedTokenAmount = mulDivBN(
-  //       totalIssuedToken,
-  //       contributionOne,
-  //       sum
-  //     );
-
-  //     console.log("calculated token amt:: ", calculatedTokenAmount.toString());
-
-  //     const receipt = await IssuanceInstance.redeemTokens({
-  //       from: investorOne,
-  //     });
-
-  //     expectEvent(receipt, "TokensRedeemed", {
-  //       redeemer: investorOne,
-  //       value: calculatedTokenAmount,
-  //     });
-  //   });
-
-  //   it("Migrate investment fund should total sum", async () => {
-  //     const IssuanceInstance = await Issuance.deployed();
-  //     const issuanceAddress = IssuanceInstance.address;
-  //     const totalRaised = await web3.eth.getBalance(issuanceAddress);
-
-  //     console.log("total raised:: ", totalRaised);
-
-  //     const receipt = await IssuanceInstance.migrateInvestmentFund(admin);
-
-  //     expectEvent(receipt, "InvestmentFundTransferred", {
-  //       recipient: admin,
-  //       value: totalRaised,
-  //     });
-  //   });
-
-  //   it("Cannot return stagnant tokens before 180 days", async () => {
-  //     const IssuanceInstance = await Issuance.deployed();
-
-  //     await expectRevert(
-  //       IssuanceInstance.returnStagnantTokens(admin),
-  //       "cannot return tokens before 60 days after redemption window"
-  //     );
-  //   });
-
-  //   it("Cannot return stagnant tokens at 179.99 days!", async () => {
-  //     const IssuanceInstance = await Issuance.deployed();
-
-  //     const timestamp = (await web3.eth.getBlock("latest")).timestamp;
-  //     const canRedeemWindowTimestamp = (
-  //       await IssuanceInstance.redemptionWindowTimestamp()
-  //     ).toNumber();
-  //     console.log("first time:: ", timestamp);
-  //     console.log("canRedeemWindowTimestamp:: ", canRedeemWindowTimestamp);
-
-  //     const daysAdvanceAmount =
-  //       60 * 24 * 60 * 60 - 1 - (timestamp - canRedeemWindowTimestamp); // just one second short
-
-  //     await advanceTimeAndBlock(daysAdvanceAmount);
-  //     const newTimestamp = (await web3.eth.getBlock("latest")).timestamp;
-  //     console.log("new time::: ", newTimestamp);
-
-  //     await expectRevert(
-  //       IssuanceInstance.returnStagnantTokens(admin),
-  //       "cannot return tokens before 60 days after redemption window"
-  //     );
-  //   });
-
-  //   it("Can return stagnant tokens 60 days after can redeem", async () => {
-  //     // note probably not worth returning dust if all that is left is a few wei
-  //     const IssuanceInstance = await Issuance.deployed();
-  //     const UTInstance = await YoloEthereumUtilityTokens.deployed();
-  //     const issuanceAddress = IssuanceInstance.address;
-
-  //     const timestamp = (await web3.eth.getBlock("latest")).timestamp;
-  //     console.log("last timestamp:: ", timestamp);
-
-  //     const daysAdvanceAmount = 2; // 60 days * 24 hours * 60 minutes * 60 seconds + 2 seconds
-
-  //     const amountToReturn = await UTInstance.balanceOf(issuanceAddress);
-
-  //     await advanceTimeAndBlock(daysAdvanceAmount);
-  //     const afterAdvanceTimestamp = (await web3.eth.getBlock("latest"))
-  //       .timestamp;
-  //     console.log("after advance timestamp:: ", afterAdvanceTimestamp);
-
-  //     const receipt = await IssuanceInstance.returnStagnantTokens(admin);
-  //     const receiptTimestamp = (await web3.eth.getBlock("latest")).timestamp;
-  //     console.log("after receipt timestamp:: ", receiptTimestamp);
-
-  //     expectEvent(receipt, "StagnantTokensReturned", {
-  //       recipient: admin,
-  //       value: amountToReturn,
-  //     });
-  //   });
-  // });
-
-  // contract("Multiple contributors", async () => {
-  //   before("Move Yolo tokens to contract", async () => {
-  //     const UTInstance = await YoloEthereumUtilityTokens.deployed();
-  //     const IssuanceInstance = await Issuance.deployed();
-  //     const issuanceAddress = IssuanceInstance.address;
-  //     await UTInstance.transfer(issuanceAddress, totalIssuedToken.toString());
-
-  //     let contributionValue = 1;
-
-  //     const contributionTxns = accounts.map((account) => {
-  //       const txnPromise = IssuanceInstance.contribute({
-  //         from: account,
-  //         value: contributionValue,
-  //       });
-  //       totalContributions += contributionValue;
-  //       contributionValue += 1;
-  //       return txnPromise;
-  //     });
-
-  //     await Promise.all(contributionTxns);
-  //   });
-
-  //   it("Sum variable is equivalent to total contributions", async () => {
-  //     const IssuanceInstance = await Issuance.deployed();
-  //     const sum = (await IssuanceInstance.sum()).toString();
-  //     const contributedSum = contributionOne.add(contributionTwo).toString();
-
-  //     console.log("total check:: ", totalContributions);
-  //     assert.equal(
-  //       sum,
-  //       totalContributions,
-  //       "total contributions should be equivalent to sum"
-  //     );
-  //   });
-
-  //   it("Cannot claim right after issuance window closed", async () => {
-  //     const IssuanceInstance = await Issuance.deployed();
-  //     await IssuanceInstance.endTokenIssuance();
-
-  //     const redeemTxns = accounts.map(async (account) => {
-  //       await expectRevert(
-  //         IssuanceInstance.redeemTokens({ from: account }),
-  //         "redemption window is not open yet"
-  //       );
-  //     });
-
-  //     await Promise.all(redeemTxns);
-  //   });
-
-  // it("Investor claim check is false before token redemption", async () => {
-  //   const IssuanceInstance = await Issuance.deployed();
-  //   const hasClaimed = await IssuanceInstance.claimsCheck(investorTwo);
-
-  //   assert.equal(
-  //     hasClaimed,
-  //     false,
-  //     "claim should be false prior to redemption",
-  //   );
-  // });
-
-  // it("Redeem tokens", async () => {
-  //   const IssuanceInstance = await Issuance.deployed();
-  //   await IssuanceInstance.openRedemptionRegime();
-  //   const sum = await IssuanceInstance.sum();
-
-  //   console.log("cantributionOne toNumber:: ", contributionOne.toNumber());
-  //   console.log(
-  //     "totalIssued string to number:: ",
-  //     Number(totalIssuedToken.toString()),
-  //   );
-
-  //   console.log("two contrib sum:: ", sum.toString());
-  //   console.log("contributionTwo:: ", contributionTwo.toNumber());
-  //   console.log("number sum:: ", sum.toString());
-
-  //   // only one investorOne, so should receive all tokens
-  //   const calculatedTokenAmount = mulDivBN(
-  //     totalIssuedToken,
-  //     contributionTwo,
-  //     sum,
-  //   );
-
-  //   const receipt = await IssuanceInstance.redeemTokens({
-  //     from: investorTwo,
-  //   });
-
-  //   expectEvent(receipt, "TokensRedeemed", {
-  //     redeemer: investorTwo,
-  //     value: calculatedTokenAmount,
-  //   });
-  // });
-
-  // it("Investor claim check following his redemption should be true", async () => {
-  //   const IssuanceInstance = await Issuance.deployed();
-  //   const hasClaimed = await IssuanceInstance.claimsCheck(investorTwo);
-
-  //   assert.equal(
-  //     hasClaimed,
-  //     true,
-  //     "claim should be false prior to redemption",
-  //   );
-  // });
-
-  // it("A second investor's claim check should be false before redemption", async () => {
-  //   const IssuanceInstance = await Issuance.deployed();
-  //   const hasClaimed = await IssuanceInstance.claimsCheck(investorOne);
-
-  //   assert.equal(
-  //     hasClaimed,
-  //     false,
-  //     "claim should be false prior to redemption",
-  //   );
-  // });
-
-  // it("Claim already executed", async () => {
-  //   const IssuanceInstance = await Issuance.deployed();
-
-  //   await expectRevert(
-  //     IssuanceInstance.redeemTokens({ from: investorTwo }),
-  //     "prior claim executed",
-  //   );
-  // });
-
-  // it("Last contributor redeems tokens", async () => {
-  //   const IssuanceInstance = await Issuance.deployed();
-  //   await IssuanceInstance.openRedemptionRegime();
-  //   const sum = await IssuanceInstance.sum();
-
-  //   console.log("two contrib sum:: ", sum.toString());
-  //   console.log("contributionTwo:: ", contributionOne.toNumber());
-  //   console.log("number sum:: ", Number(sum));
-
-  //   // only one investorOne, so should receive all tokens
-  //   const calculatedTokenAmount = mulDivBN(
-  //     totalIssuedToken,
-  //     contributionOne,
-  //     sum,
-  //   );
-
-  //   console.log("calculated token amt:: ", calculatedTokenAmount.toString());
-
-  //   const receipt = await IssuanceInstance.redeemTokens({
-  //     from: investorOne,
-  //   });
-
-  //   expectEvent(receipt, "TokensRedeemed", {
-  //     redeemer: investorOne,
-  //     value: calculatedTokenAmount,
-  //   });
-  // });
-
-  // it("Migrate investment fund should total sum", async () => {
-  //   const IssuanceInstance = await Issuance.deployed();
-  //   const issuanceAddress = IssuanceInstance.address;
-  //   const totalRaised = await web3.eth.getBalance(issuanceAddress);
-
-  //   console.log("total raised:: ", totalRaised);
-
-  //   const receipt = await IssuanceInstance.migrateInvestmentFund(admin);
-
-  //   expectEvent(receipt, "InvestmentFundTransferred", {
-  //     recipient: admin,
-  //     value: totalRaised,
-  //   });
-  // });
-  // });
+  contract("More restricted actions", async () => {
+    let issuanceEthereum;
+    let issuancePolygon;
+    let yoloEthereumTokens;
+    let yoloPolygonTokens;
+    let rootChainManagerProxy;
+    let childChainManagerProxy;
+
+    before(async () => {
+      issuanceEthereum = await Mock_IssuanceEthereum.deployed();
+      issuancePolygon = await Mock_IssuancePolygon.deployed();
+      yoloEthereumTokens = await YoloEthereumUtilityTokens.deployed();
+      yoloPolygonTokens = await YoloPolygonUtilityTokens.deployed();
+      rootChainManagerProxy = await Mock_RootChainManagerProxy.deployed();
+      childChainManagerProxy = await Mock_ChildChainManagerProxy.deployed();
+    });
+
+    it("Cannot open polygon contribution window with preallotted token", async () => {
+      await childChainManagerProxy.setPolygonTokenAddress(
+        yoloPolygonTokens.address
+      );
+      await childChainManagerProxy.depositToChild(
+        issuancePolygon.address,
+        oneWei
+      );
+
+      await expectRevert(
+        issuancePolygon.openContributionWindow(),
+        "No tokens must be transferred to issuance contract before issuance is started"
+      );
+    });
+  });
+
+  contract(
+    "Miscellaneous - Token escape hatch and address setters",
+    async () => {
+      let issuanceEthereum;
+      let issuancePolygon;
+      let yoloEthereumTokens;
+      let yoloPolygonTokens;
+
+      before(async () => {
+        issuanceEthereum = await Mock_IssuanceEthereum.deployed();
+        issuancePolygon = await Mock_IssuancePolygon.deployed();
+        yoloEthereumTokens = await YoloEthereumUtilityTokens.deployed();
+        yoloPolygonTokens = await YoloPolygonUtilityTokens.deployed();
+      });
+
+      it("Cannot open polygon contribution window with preallotted token", async () => {
+        await yoloEthereumTokens.transfer(issuanceEthereum.address, oneWei);
+
+        await issuanceEthereum.returnYoloTokens(unassociatedAccount, oneWei);
+
+        assert(
+          (await yoloEthereumTokens.balanceOf(unassociatedAccount)).toString(),
+          oneWei,
+          "returned amount should be one wei"
+        );
+      });
+
+      it("Predicate contract address setter behaves", async () => {
+        await expectRevert(
+          issuanceEthereum.setPredicateContractAddress(unassociatedAccount, {
+            from: unassociatedAccount,
+          }),
+          "Must have admin role to invoke"
+        );
+
+        await expectRevert(
+          issuanceEthereum.setPredicateContractAddress(ZERO_ADDRESS),
+          "erc20 predicate contract address must be specified"
+        );
+
+        await issuanceEthereum.setPredicateContractAddress(unassociatedAccount),
+          assert(
+            await issuanceEthereum.predicateContractAddress(),
+            unassociatedAccount,
+            "predicate contract address should now be unassocitatedAccount"
+          );
+      });
+
+      it("Root manager contract setter behaves", async () => {
+        await expectRevert(
+          issuanceEthereum.setRootManagerContract(unassociatedAccount, {
+            from: unassociatedAccount,
+          }),
+          "Must have admin role to invoke"
+        );
+
+        await expectRevert(
+          issuanceEthereum.setRootManagerContract(ZERO_ADDRESS),
+          "root chain manager contract address must be specified"
+        );
+
+        await issuanceEthereum.setRootManagerContract(unassociatedAccount),
+          assert(
+            await issuanceEthereum.rootChainManagerContract(),
+            unassociatedAccount,
+            "root chain contract address should now be unassocitatedAccount"
+          );
+      });
+
+      it("Fx Child contract setter behaves", async () => {
+        await expectRevert(
+          issuanceEthereum.setFxChildTunnel(unassociatedAccount, {
+            from: unassociatedAccount,
+          }),
+          "Must have admin role to invoke"
+        );
+
+        await expectRevert(
+          issuanceEthereum.setFxChildTunnel(ZERO_ADDRESS),
+          "fx child tunnel aka child issuance contract address must be specified"
+        );
+
+        await issuanceEthereum.setFxChildTunnel(unassociatedAccount),
+          assert(
+            await issuanceEthereum.fxChildTunnel(),
+            unassociatedAccount,
+            "root chain contract address should now be unassocitatedAccount"
+          );
+      });
+
+      it("Fx Root contract setter behaves", async () => {
+        await expectRevert(
+          issuanceEthereum.setFxRoot(unassociatedAccount, {
+            from: unassociatedAccount,
+          }),
+          "Must have admin role to invoke"
+        );
+
+        await expectRevert(
+          issuanceEthereum.setFxRoot(ZERO_ADDRESS),
+          "fxRoot contract address must be specified"
+        );
+
+        await issuanceEthereum.setFxRoot(unassociatedAccount),
+          assert(
+            await issuanceEthereum.fxRoot(),
+            unassociatedAccount,
+            "fx root contract address should now be unassocitatedAccount"
+          );
+      });
+
+      it("Checkpoint Manager contract setter behaves", async () => {
+        await expectRevert(
+          issuanceEthereum.setCheckpointManager(unassociatedAccount, {
+            from: unassociatedAccount,
+          }),
+          "Must have admin role to invoke"
+        );
+
+        await expectRevert(
+          issuanceEthereum.setCheckpointManager(ZERO_ADDRESS),
+          "checkpoint manager contract address must be specified"
+        );
+
+        await issuanceEthereum.setCheckpointManager(unassociatedAccount),
+          assert(
+            await issuanceEthereum.fxRoot(),
+            unassociatedAccount,
+            "checkpoint manager contract address should now be unassocitatedAccount"
+          );
+      });
+
+      it("YOLO Polygon Token contract setter behaves", async () => {
+        await expectRevert(
+          issuancePolygon.setYoloPolygonTokenContract(unassociatedAccount, {
+            from: unassociatedAccount,
+          }),
+          "Must have admin role to invoke"
+        );
+
+        await expectRevert(
+          issuancePolygon.setYoloPolygonTokenContract(ZERO_ADDRESS),
+          "YOLO polygon token contract address must be specified"
+        );
+
+        await issuancePolygon.setYoloPolygonTokenContract(unassociatedAccount),
+          assert(
+            await issuancePolygon.yoloPolygonTokenContract(),
+            unassociatedAccount,
+            "YOLO polygon contract address should now be unassocitatedAccount"
+          );
+      });
+
+      it("Matic Wrapped Eth Token contract setter behaves", async () => {
+        await expectRevert(
+          issuancePolygon.setMEthTokenContract(unassociatedAccount, {
+            from: unassociatedAccount,
+          }),
+          "Must have admin role to invoke"
+        );
+
+        await expectRevert(
+          issuancePolygon.setMEthTokenContract(ZERO_ADDRESS),
+          "mEth token contract address must be specified"
+        );
+
+        await issuancePolygon.setMEthTokenContract(unassociatedAccount),
+          assert(
+            await issuancePolygon.mEthTokenContract(),
+            unassociatedAccount,
+            "wrapped Eth contract address should now be unassocitatedAccount"
+          );
+      });
+
+      it("Fx Child contract setter behaves", async () => {
+        await expectRevert(
+          issuancePolygon.setFxChild(unassociatedAccount, {
+            from: unassociatedAccount,
+          }),
+          "Must have admin role to invoke"
+        );
+
+        await expectRevert(
+          issuancePolygon.setFxChild(ZERO_ADDRESS),
+          "fxChild contract address must be specified"
+        );
+
+        await issuancePolygon.setFxChild(unassociatedAccount),
+          assert(
+            await issuancePolygon.fxChild(),
+            unassociatedAccount,
+            "Fx Child contract address should now be unassocitatedAccount"
+          );
+      });
+    }
+  );
+
+  for (let i = 0; i < 3; i++) {
+    const generateRandomContributionBN = (ethMax, ethDecimals) => {
+      const ethFactor = ethMax * 10 ** ethDecimals;
+      const randWhole = Math.round(ethFactor * Math.random()).toString();
+
+      return new BN(randWhole)
+        .mul(tokenDecimals)
+        .div(new BN(10 ** ethDecimals));
+    };
+
+    contract(`Contributions simulator #${i + 1}`, async () => {
+      let issuanceEthereum;
+      let issuancePolygon;
+      let yoloEthereumTokens;
+      let yoloPolygonTokens;
+      let mEthTokens;
+      let rootChainManagerProxy;
+      let childChainManagerProxy;
+      const ethereumContributions = {};
+      const polygonContributions = {};
+      let ethereumTotalContribution = new BN("0");
+      let polygonTotalContribution = new BN("0");
+
+      before(async () => {
+        issuanceEthereum = await Mock_IssuanceEthereum.deployed();
+        issuancePolygon = await Mock_IssuancePolygon.deployed();
+        yoloEthereumTokens = await YoloEthereumUtilityTokens.deployed();
+        yoloPolygonTokens = await YoloPolygonUtilityTokens.deployed();
+        mEthTokens = await Mock_MEthTokens.deployed();
+        rootChainManagerProxy = await Mock_RootChainManagerProxy.deployed();
+        childChainManagerProxy = await Mock_ChildChainManagerProxy.deployed();
+
+        await rootChainManagerProxy.setRootIssuanceAddress(
+          issuanceEthereum.address
+        );
+        await childChainManagerProxy.setPolygonTokenAddress(
+          yoloPolygonTokens.address
+        );
+
+        await yoloEthereumTokens.transfer(
+          issuanceEthereum.address,
+          totalIssuedToken
+        );
+
+        await issuanceEthereum.openContributionWindow();
+        await issuancePolygon.openContributionWindow();
+
+        console.log(
+          "ethereum tokens on contract before ",
+          web3.utils.fromWei(
+            await yoloEthereumTokens.balanceOf(issuanceEthereum.address),
+            "ether"
+          )
+        );
+      });
+
+      it("Makes contributions from community", async () => {
+        // const contributorsCount = Math.round(10 * Math.random() - 0.05);
+
+        // simulate eth contribution up to 100 eth with 3 decimal places
+
+        const ethereumContributionsPromises = accounts.map((account) => {
+          const randEth = generateRandomContributionBN(100, 3);
+          ethereumTotalContribution = ethereumTotalContribution.add(randEth);
+          ethereumContributions[account] = randEth;
+
+          return issuanceEthereum.contribute({
+            from: account,
+            value: randEth,
+          });
+        });
+
+        const polygonContributionsPromises = accounts.map(async (account) => {
+          const randEth = generateRandomContributionBN(100, 3);
+          polygonTotalContribution = polygonTotalContribution.add(randEth);
+          polygonContributions[account] = randEth;
+
+          await mEthTokens.transfer(account, randEth);
+
+          await mEthTokens.approve(issuancePolygon.address, randEth, {
+            from: account,
+          });
+
+          return issuancePolygon.contribute(randEth, {
+            from: account,
+          });
+        });
+
+        console.log(
+          "total eth con",
+          web3.utils.fromWei(ethereumTotalContribution, "ether")
+        );
+        console.log(
+          "total wrapped con",
+          web3.utils.fromWei(polygonTotalContribution, "ether")
+        );
+
+        await Promise.all(ethereumContributionsPromises);
+        await Promise.all(polygonContributionsPromises);
+
+        const rootSum = await issuanceEthereum.rootSum();
+        const childSum = await issuancePolygon.childSum();
+
+        assert.equal(
+          rootSum,
+          ethereumTotalContribution.toString(),
+          "root sum does not match expected ethereum contributions"
+        );
+
+        assert.equal(
+          childSum,
+          polygonTotalContribution.toString(),
+          "child sum does not match expected polygon contributions"
+        );
+
+        const contributionBalancePromises = accounts.map(async (account) => {
+          const ethereumContrib = await issuanceEthereum.contributorAmounts(
+            account
+          );
+          const polygonContrib = await issuancePolygon.contributorAmounts(
+            account
+          );
+
+          assert(
+            ethereumContrib,
+            ethereumContributions[account],
+            "contribution amount on contract should match expected"
+          );
+
+          assert(
+            polygonContrib,
+            polygonContributions[account],
+            "contribution amount on contract should match expected"
+          );
+        });
+
+        await Promise.all(contributionBalancePromises);
+      });
+
+      it("Correct cross-chain token distributions", async () => {
+        await issuanceEthereum.closeContributionWindow();
+        await issuancePolygon.closeContributionWindow();
+
+        await rootChainManagerProxy.setRootIssuanceAddress(
+          issuanceEthereum.address
+        );
+        await childChainManagerProxy.setPolygonTokenAddress(
+          yoloPolygonTokens.address
+        );
+        await yoloEthereumTokens.approve(
+          Mock_RootChainManagerProxy.address,
+          MAX_UINT256
+        );
+
+        console.log(
+          "ethereum tokens on contract BEFORE ",
+          web3.utils.fromWei(
+            await yoloEthereumTokens.balanceOf(issuanceEthereum.address),
+            "ether"
+          )
+        );
+
+        const childSumProofMock = (await issuancePolygon.childSum()).toString();
+
+        // !!! calling mock override
+        // must be greated than 0 transfer according to ERC20
+        // will move all tokens over in this test
+        await issuanceEthereum.receiveMessage(
+          web3.eth.abi.encodeParameter("uint256", childSumProofMock)
+        );
+        await issuanceEthereum.depositOnChildIssuanceContract();
+
+        const expectedTotalCrossChainSum = ethereumTotalContribution.add(
+          polygonTotalContribution
+        );
+
+        console.log(
+          "cross total ",
+          web3.utils.fromWei(expectedTotalCrossChainSum, "ether")
+        );
+        console.log(
+          "ethereum tokens on contract AFTER ",
+          web3.utils.fromWei(
+            await yoloEthereumTokens.balanceOf(issuanceEthereum.address),
+            "ether"
+          )
+        );
+
+        const expectedEthereumTokens = mulDivBN(
+          totalIssuedToken,
+          ethereumTotalContribution,
+          expectedTotalCrossChainSum
+        );
+
+        const expectedPolygonTokens = mulDivBN(
+          totalIssuedToken,
+          polygonTotalContribution,
+          expectedTotalCrossChainSum
+        );
+
+        console.log(
+          "expected ethereum side tokens ",
+          web3.utils.fromWei(expectedEthereumTokens, "ether")
+        );
+        const issuanceEthereumTokenBalance = await yoloEthereumTokens.balanceOf(
+          issuanceEthereum.address
+        );
+
+        const issuancePolygonTokenBalance = await yoloPolygonTokens.balanceOf(
+          issuancePolygon.address
+        );
+
+        // there is a one wei discrepency between BN lib and EVM operations..
+        assert(
+          issuanceEthereumTokenBalance
+            .sub(expectedEthereumTokens)
+            .abs()
+            .lte(bnOne),
+          "issuanceEthereum token distribution does not match expected"
+        );
+
+        assert(
+          issuancePolygonTokenBalance
+            .sub(expectedPolygonTokens)
+            .abs()
+            .lte(bnOne),
+          "issuancePolygon token distribution does not match expected"
+        );
+
+        assert(
+          issuanceEthereumTokenBalance
+            .add(issuancePolygonTokenBalance)
+            .eq(totalIssuedToken),
+          "total issued tokens must add up after cross chain transfer"
+        );
+      });
+
+      it("Receive expected token fractions", async () => {
+        let yoloEthSanityCheck = new BN("0");
+        let yoloPolySanityCheck = new BN("0");
+
+        await issuanceEthereum.openRedemptionRegime();
+        await issuancePolygon.openRedemptionRegime();
+
+        const issuanceEthereumTokenBalance = await yoloEthereumTokens.balanceOf(
+          issuanceEthereum.address
+        );
+
+        const rootSum = await issuanceEthereum.rootSum();
+        const childSum = await issuancePolygon.childSum();
+
+        const issuancePolygonTokenBalance = await yoloPolygonTokens.balanceOf(
+          issuancePolygon.address
+        );
+
+        const redemptionPromises = accounts.map(async (account) => {
+          const ethereumContrib = await issuanceEthereum.contributorAmounts(
+            account
+          );
+
+          const polygonContrib = await issuancePolygon.contributorAmounts(
+            account
+          );
+
+          const expectedEthereumClaimAmount = mulDivBN(
+            issuanceEthereumTokenBalance,
+            ethereumContrib,
+            rootSum
+          );
+
+          const expectedPolygonClaimAmount = mulDivBN(
+            issuancePolygonTokenBalance,
+            polygonContrib,
+            childSum
+          );
+
+          const yoloEthBalBefore = await yoloEthereumTokens.balanceOf(account);
+          await issuanceEthereum.redeemTokens({ from: account });
+          const yoloEthBalAfter = await yoloEthereumTokens.balanceOf(account);
+          const yoloEthRedemptionAmount = yoloEthBalAfter.sub(yoloEthBalBefore);
+          yoloEthSanityCheck = yoloEthSanityCheck.add(yoloEthRedemptionAmount);
+          // console.log(
+          //   "yoloEth redemptions ",
+          //   web3.utils.fromWei(yoloEthRedemptionAmount, "ether")
+          // );
+
+          const yoloPolBalBefore = await yoloPolygonTokens.balanceOf(account);
+          await issuancePolygon.redeemTokens({ from: account });
+          const yoloPolBalAfter = await yoloPolygonTokens.balanceOf(account);
+          const polyEthRedemptionAmount = yoloPolBalAfter.sub(yoloPolBalBefore);
+          yoloPolySanityCheck = yoloPolySanityCheck.add(
+            polyEthRedemptionAmount
+          );
+          // console.log(
+          //   "polyEth redemptions ",
+          //   web3.utils.fromWei(polyEthRedemptionAmount, "ether")
+          // );
+
+          assert.equal(
+            yoloEthRedemptionAmount.toString(),
+            expectedEthereumClaimAmount.toString(),
+            "claim amount on ethereum chain not as expected"
+          );
+
+          assert.equal(
+            polyEthRedemptionAmount.toString(),
+            expectedPolygonClaimAmount.toString(),
+            "claim amount on polygon chain not as expected"
+          );
+        });
+
+        await Promise.all(redemptionPromises);
+
+        const totalSanityCheck = yoloEthSanityCheck.add(yoloPolySanityCheck);
+
+        console.log(
+          "token redemption totals ",
+          web3.utils.fromWei(yoloEthSanityCheck, "ether"),
+          web3.utils.fromWei(yoloPolySanityCheck, "ether"),
+          web3.utils.fromWei(totalSanityCheck, "ether")
+        );
+
+        assert(
+          totalIssuedToken.sub(totalSanityCheck).lt(bnHundred),
+          "too much token dust, exceeds tolerance!!"
+        );
+      });
+
+      it("Migrates investment fund", async () => {
+        await issuanceEthereum.registerFundRecipient(unassociatedAccount);
+        await issuancePolygon.registerFundRecipient(unassociatedAccount);
+
+        const rootSum = await issuanceEthereum.rootSum();
+        const childSum = await issuancePolygon.childSum();
+
+        const ethBalanceBefore = await web3.eth.getBalance(unassociatedAccount);
+        console.log("eth balance BEFORE: ", ethBalanceBefore);
+
+        const wrappedEthBalanceBefore = await mEthTokens.balanceOf(
+          unassociatedAccount
+        );
+
+        const contractEthBalance = await web3.eth.getBalance(
+          issuanceEthereum.address
+        );
+
+        assert.equal(
+          rootSum.toString(),
+          contractEthBalance,
+          "contract balance should match rootSum"
+        );
+
+        await issuanceEthereum.migrateInvestmentFund(unassociatedAccount);
+        await issuancePolygon.migrateInvestmentFund(unassociatedAccount);
+
+        const ethBalanceAfter = await web3.eth.getBalance(unassociatedAccount);
+        console.log("eth balance AFTER: ", ethBalanceAfter);
+        const wrappedEthBalanceAfter = await mEthTokens.balanceOf(
+          unassociatedAccount
+        );
+
+        const ethGain = new BN(ethBalanceAfter).sub(new BN(ethBalanceBefore));
+        const wrappedEthGain = new BN(wrappedEthBalanceAfter).sub(
+          new BN(wrappedEthBalanceBefore)
+        );
+
+        assert.equal(
+          ethGain.toString(),
+          rootSum.toString(),
+          "migrated eth does not match expected"
+        );
+        assert.equal(
+          wrappedEthGain.toString(),
+          childSum.toString(),
+          "migrated wrapped eth does not match expected"
+        );
+      });
+    });
+  }
 });

@@ -72,6 +72,10 @@ contract IssuancePolygon is IssuanceCommon, FxBaseChildTunnel {
         public
         restricted
     {
+        require(
+            _yoloPolygonTokenAddress != address(0),
+            "YOLO polygon token contract address must be specified"
+        );
         yoloPolygonTokenContract = YoloPolygonUtilityTokens(
             _yoloPolygonTokenAddress
         );
@@ -82,6 +86,10 @@ contract IssuancePolygon is IssuanceCommon, FxBaseChildTunnel {
         public
         restricted
     {
+        require(
+            _mEthTokenContractAddress != address(0),
+            "mEth token contract address must be specified"
+        );
         mEthTokenContract = IERC20(_mEthTokenContractAddress);
     }
 
@@ -107,7 +115,7 @@ contract IssuancePolygon is IssuanceCommon, FxBaseChildTunnel {
         return true;
     }
 
-    function contribute(uint256 mEthAmount) public payable returns (bool) {
+    function contribute(uint256 mEthAmount) public returns (bool) {
         require(
             isContributionWindowOpen == true,
             "contribution window has not opened"
@@ -116,7 +124,7 @@ contract IssuancePolygon is IssuanceCommon, FxBaseChildTunnel {
             isContributionWindowClosed == false,
             "contribution window has closed"
         );
-        require(mEthAmount > 0, "zero amount invalid");
+        require(mEthAmount >= 0.01 ether, "minimum contribution is 0.01 ether");
 
         require(
             mEthAmount <=
@@ -129,6 +137,7 @@ contract IssuancePolygon is IssuanceCommon, FxBaseChildTunnel {
         mEthTokenContract.transferFrom(msg.sender, address(this), mEthAmount);
         contributorAmounts[msg.sender] = contributorTotal;
 
+        // Fixed Here - Check again
         childSum += mEthAmount;
 
         emit ContributionMade(msg.sender, mEthAmount);
@@ -172,6 +181,7 @@ contract IssuancePolygon is IssuanceCommon, FxBaseChildTunnel {
 
     // !!! Add virtual for unit testing !!!
     function openRedemptionRegime() external virtual override returns (bool) {
+        // Which will unlock once the product goes live.
         require(
             isContributionWindowClosed == true,
             "contribution window must be closed"
@@ -209,9 +219,7 @@ contract IssuancePolygon is IssuanceCommon, FxBaseChildTunnel {
     }
 
     // !!! Added virtual for unit testing !!!
-    // TODO: either allow them to withdraw or use "make love not war" pattern
     function redeemTokens() external virtual override returns (bool) {
-        // Which will unlock once the product goes live.
         require(
             isRedemptionRegimeOpen == true,
             "redemption window is not open yet"
@@ -224,7 +232,6 @@ contract IssuancePolygon is IssuanceCommon, FxBaseChildTunnel {
 
         yoloPolygonTokenContract.transfer(msg.sender, claimAmount);
 
-        // TODO: Set it zero? Replace claimsCheck bools? Any reasons we should or shoudn't set it zero.
         contributorAmounts[msg.sender] = 0;
 
         emit TokensRedeemed(msg.sender, claimAmount);
@@ -232,7 +239,7 @@ contract IssuancePolygon is IssuanceCommon, FxBaseChildTunnel {
         return true;
     }
 
-    function migrateInvestmentFund(address payable recipient)
+    function migrateInvestmentFund(address recipient)
         external
         restricted
         validateRecipient(recipient)
@@ -240,7 +247,7 @@ contract IssuancePolygon is IssuanceCommon, FxBaseChildTunnel {
     {
         require(
             isContributionWindowClosed == true,
-            "redemption window must be open"
+            "contribution window must be closed"
         );
 
         uint256 contractBalance = mEthTokenContract.balanceOf(address(this));

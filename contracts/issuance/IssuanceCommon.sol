@@ -11,11 +11,9 @@ abstract contract IssuanceCommon is Ownable {
     bool public isRedemptionRegimeOpen;
     uint256 public contributionStartTimestamp;
 
-    // !!! mark internal for unit testing
     // Mapping contributors address to amount
     mapping(address => uint256) public contributorAmounts;
 
-    // should claim data be easily available?
     mapping(address => bool) public claimsCheck;
 
     event ContributionWindowOpened(address indexed authorizer);

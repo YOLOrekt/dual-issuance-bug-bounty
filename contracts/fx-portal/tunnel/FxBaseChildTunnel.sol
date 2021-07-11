@@ -40,6 +40,10 @@ abstract contract FxBaseChildTunnel is IFxMessageProcessor, Ownable {
 
     // just in case
     function setFxChild(address _fxChild) public restricted {
+        require(
+            _fxChild != address(0),
+            "fxChild contract address must be specified"
+        );
         fxChild = _fxChild;
     }
 

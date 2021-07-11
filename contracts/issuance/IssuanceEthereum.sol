@@ -85,7 +85,7 @@ contract IssuanceEthereum is IssuanceCommon, FxBaseRootTunnel {
             "erc20 predicate contract address must be specified"
         );
 
-        // TODO: Use ChainId to compare and stop contract instantiaion if its the wrong address?
+        // Use ChainId to compare and stop contract instantiaion if its the wrong address
 
         yoloEthereumTokenContract = YoloEthereumUtilityTokens(
             yoloEthereumTokenAddress_
@@ -100,6 +100,10 @@ contract IssuanceEthereum is IssuanceCommon, FxBaseRootTunnel {
         restricted
         returns (bool)
     {
+        require(
+            contractAddress != address(0),
+            "erc20 predicate contract address must be specified"
+        );
         predicateContractAddress = contractAddress;
 
         return true;
@@ -111,6 +115,10 @@ contract IssuanceEthereum is IssuanceCommon, FxBaseRootTunnel {
         restricted
         returns (bool)
     {
+        require(
+            contractAddress != address(0),
+            "root chain manager contract address must be specified"
+        );
         rootChainManagerContract = IRootChainManager(contractAddress);
 
         return true;
@@ -166,7 +174,7 @@ contract IssuanceEthereum is IssuanceCommon, FxBaseRootTunnel {
             isContributionWindowClosed == false,
             "contribution window has closed"
         );
-        require(msg.value > 0, "zero amount invalid");
+        require(msg.value >= 0.01 ether, "minimum contribution is 0.01 ether");
 
         uint256 contributorTotal = contributorAmounts[msg.sender] + msg.value;
 
@@ -208,13 +216,12 @@ contract IssuanceEthereum is IssuanceCommon, FxBaseRootTunnel {
         returns (bool)
     {
         require(
-            hasProcessedMessageFromChild == true,
-            "childSum must be processed from child first"
-        );
-
-        require(
             isContributionWindowClosed == true,
             "contribution window must be closed"
+        );
+        require(
+            hasProcessedMessageFromChild == true,
+            "childSum must be processed from child first"
         );
         require(
             predicateContractAddress != address(0),
@@ -249,6 +256,7 @@ contract IssuanceEthereum is IssuanceCommon, FxBaseRootTunnel {
     }
 
     function openRedemptionRegime() external override returns (bool) {
+        // check repeateadly - this means isContributionWindowClosed is also true
         require(
             hasRootToChildTransferRequest == true,
             "requires token transfer request to child and updated root token pool amount"
@@ -293,7 +301,6 @@ contract IssuanceEthereum is IssuanceCommon, FxBaseRootTunnel {
         return true;
     }
 
-    // TODO: either allow them to withdraw or use "make love not war" pattern
     function redeemTokens() external override returns (bool) {
         // Which will unlock once the product goes live.
         require(
@@ -301,7 +308,7 @@ contract IssuanceEthereum is IssuanceCommon, FxBaseRootTunnel {
             "redemption window is not open yet"
         );
         require(claimsCheck[msg.sender] == false, "prior claim executed");
-        // TODO: should we replace with zeroing contrib amount?
+
         claimsCheck[msg.sender] = true;
 
         uint256 claimAmount = (contributorAmounts[msg.sender] *

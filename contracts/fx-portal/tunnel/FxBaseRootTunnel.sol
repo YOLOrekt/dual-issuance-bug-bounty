@@ -58,11 +58,19 @@ abstract contract FxBaseRootTunnel is Ownable {
 
     // just in case
     function setFxChildTunnel(address _fxChildTunnel) public restricted {
+        require(
+            _fxChildTunnel != address(0),
+            "fx child tunnel aka child issuance contract address must be specified"
+        );
         fxChildTunnel = _fxChildTunnel;
     }
 
     // just in case
     function setFxRoot(address _fxRoot) public restricted {
+        require(
+            _fxRoot != address(0),
+            "fxRoot contract address must be specified"
+        );
         fxRoot = IFxStateSender(_fxRoot);
     }
 
@@ -71,6 +79,10 @@ abstract contract FxBaseRootTunnel is Ownable {
         public
         restricted
     {
+        require(
+            _checkpointManager != address(0),
+            "checkpoint manager contract address must be specified"
+        );
         checkpointManager = ICheckpointManager(_checkpointManager);
     }
 
@@ -90,36 +102,37 @@ abstract contract FxBaseRootTunnel is Ownable {
         internal
         returns (bytes memory)
     {
-        RLPReader.RLPItem[] memory inputDataRLPList =
-            inputData.toRlpItem().toList();
+        RLPReader.RLPItem[] memory inputDataRLPList = inputData
+        .toRlpItem()
+        .toList();
 
         // checking if exit has already been processed
         // unique exit is identified using hash of (blockNumber, branchMask, receiptLogIndex)
-        bytes32 exitHash =
-            keccak256(
-                abi.encodePacked(
-                    inputDataRLPList[2].toUint(), // blockNumber
-                    // first 2 nibbles are dropped while generating nibble array
-                    // this allows branch masks that are valid but bypass exitHash check (changing first 2 nibbles only)
-                    // so converting to nibble array and then hashing it
-                    MerklePatriciaProof._getNibbleArray(
-                        inputDataRLPList[8].toBytes()
-                    ), // branchMask
-                    inputDataRLPList[9].toUint() // receiptLogIndex
-                )
-            );
+        bytes32 exitHash = keccak256(
+            abi.encodePacked(
+                inputDataRLPList[2].toUint(), // blockNumber
+                // first 2 nibbles are dropped while generating nibble array
+                // this allows branch masks that are valid but bypass exitHash check (changing first 2 nibbles only)
+                // so converting to nibble array and then hashing it
+                MerklePatriciaProof._getNibbleArray(
+                    inputDataRLPList[8].toBytes()
+                ), // branchMask
+                inputDataRLPList[9].toUint() // receiptLogIndex
+            )
+        );
         require(
             processedExits[exitHash] == false,
             "FxRootTunnel: EXIT_ALREADY_PROCESSED"
         );
         processedExits[exitHash] = true;
 
-        RLPReader.RLPItem[] memory receiptRLPList =
-            inputDataRLPList[6].toBytes().toRlpItem().toList();
-        RLPReader.RLPItem memory logRLP =
-            receiptRLPList[3].toList()[
-                inputDataRLPList[9].toUint() // receiptLogIndex
-            ];
+        RLPReader.RLPItem[] memory receiptRLPList = inputDataRLPList[6]
+        .toBytes()
+        .toRlpItem()
+        .toList();
+        RLPReader.RLPItem memory logRLP = receiptRLPList[3].toList()[
+            inputDataRLPList[9].toUint() // receiptLogIndex
+        ];
 
         RLPReader.RLPItem[] memory logRLPList = logRLP.toList();
 
@@ -171,18 +184,18 @@ abstract contract FxBaseRootTunnel is Ownable {
         uint256 headerNumber,
         bytes memory blockProof
     ) private view returns (uint256) {
-        (bytes32 headerRoot, uint256 startBlock, , uint256 createdAt, ) =
-            checkpointManager.headerBlocks(headerNumber);
+        (
+            bytes32 headerRoot,
+            uint256 startBlock,
+            ,
+            uint256 createdAt,
+
+        ) = checkpointManager.headerBlocks(headerNumber);
 
         require(
             keccak256(
                 abi.encodePacked(blockNumber, blockTime, txRoot, receiptRoot)
-            )
-                .checkMembership(
-                blockNumber - startBlock,
-                headerRoot,
-                blockProof
-            ),
+            ).checkMembership(blockNumber - startBlock, headerRoot, blockProof),
             "FxRootTunnel: INVALID_HEADER"
         );
         return createdAt;
