@@ -2,6 +2,11 @@
 
 Find a bug, get some crypto!! Check our twitter @playyolorekt and medium https://medium.com/yolorekt/ for more details on bounties.
 
+# Testing
+
+Run ganache-cli on the commandline with the necessary flags in order to run tests succesfully: ` ganache-cli -i 1337 -e 10000 -a 20`
+Adjust number of accounts as desired.
+
 # YOLO token dual-issuance on Ethereum and Polygon
 
 YOLOrekt is deploying a first of its kind synced token dual-issuance both on Ethereum and Polygon. The contributors can choose to buy YOLO tokens on Ethereum with Ether (ETH) or on Polygon with Matic Ether (mETH).
