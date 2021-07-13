@@ -216,6 +216,10 @@ contract IssuanceEthereum is IssuanceCommon, FxBaseRootTunnel {
         returns (bool)
     {
         require(
+            !hasRootToChildTransferRequest,
+            "root to child transfer has been done"
+        );
+        require(
             isContributionWindowClosed == true,
             "contribution window must be closed"
         );
